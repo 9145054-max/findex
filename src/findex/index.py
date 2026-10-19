@@ -1,116 +1,96 @@
-import sys
-import time
-import tracemalloc
-from collections.abc import Mapping
-from functools import cached_property
-from typing import Dict, List, Iterator, Optional, Any
-from contextlib import contextmanager
+from pathlib import Path
+from typing import List, Tuple, Dict, Iterable
+from collections import defaultdict
+from findex.corpus import tokenize
 
-from findex.corpus import process_corpus_lazy, tokenize
-from findex.models import Posting, DocMeta
-from findex.storage import load_pickle, save_pickle
 
-class InvertedIndex(Mapping):
-    def __init__(self, with_positions: bool = True):
+class InvertedIndex:
+    def __init__(self, with_positions: bool = False):
         self.with_positions = with_positions
-        self._postings: Dict[str, List[Posting]] = {}
-        self.doc_metadata: Dict[int, DocMeta] = {}
-
-    def __getitem__(self, term: str) -> List[Posting]:
-        return self._postings.get(term, [])
-
-    def __len__(self) -> int:
-        return len(self._postings)
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._postings)
-
-    def __contains__(self, term: object) -> bool:
-        return term in self._postings
-
-    def __repr__(self) -> str:
-        return f"<InvertedIndex terms={len(self)}, docs={self.num_docs}>"
+        self.index: Dict[str, List[Tuple[int, int]]] = defaultdict(list)
+        self.doc_lengths: Dict[int, int] = {}
+        self.doc_paths: Dict[int, str] = {}
+        self.num_docs: int = 0
 
     @property
-    def num_docs(self) -> int:
-        return len(self.doc_metadata)
-
-    @cached_property
     def avg_doc_length(self) -> float:
-        if not self.doc_metadata:
+        """Середня довжина документа у корпусі."""
+        if self.num_docs == 0:
             return 0.0
-        total_len = sum(doc.length for doc in self.doc_metadata.values())
-        return total_len / len(self.doc_metadata)
+        return sum(self.doc_lengths.values()) / self.num_docs
 
-    def df(self, term: str) -> int:
-        return len(self._postings.get(term, []))
+    def __contains__(self, term: str) -> bool:
+        """Підтримка перевірки 'term in index'."""
+        return term in self.index
 
-    def build(self, corpus_path: str):
-        raw_postings = {}
-        doc_counter = 0
+    def __iter__(self):
+        """Ітерація по термінах індексу."""
+        return iter(self.index)
 
-        for item in process_corpus_lazy(corpus_path):
-            if isinstance(item, tuple) and len(item) >= 2:
-                filepath = item[0]
-                content = item[1]
-            else:
-                filepath = str(item)
-                content = ""
+    def add_document(self, doc_id: int, path: str, terms: Iterable[str]):
+        term_freqs: Dict[str, int] = defaultdict(int)
+        length = 0
+        for term in terms:
+            term_freqs[term] += 1
+            length += 1
 
-            doc_id = doc_counter
-            doc_counter += 1
+        self.doc_lengths[doc_id] = length
+        self.doc_paths[doc_id] = str(path)
+        self.num_docs += 1
 
-            tokens = list(tokenize(str(content))) if isinstance(content, str) else list(content)
+        for term, freq in term_freqs.items():
+            self.index[term].append((doc_id, freq))
 
-            term_freqs = {}
-            term_positions = {}
-            doc_len = len(tokens)
+    def build(self, data_dir: str):
+        """Метод для сумісності зі старими тестами."""
+        path = Path(data_dir)
+        files = sorted([p for p in path.rglob("*") if p.is_file()])
+        for doc_id, file_path in enumerate(files):
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    text = f.read()
+                tokens = tokenize(text)
+                self.add_document(doc_id, str(file_path), tokens)
+            except Exception:
+                continue
 
-            for pos, token in enumerate(tokens):
-                term_freqs[token] = term_freqs.get(token, 0) + 1
-                if self.with_positions:
-                    if token not in term_positions:
-                        term_positions[token] = []
-                    term_positions[token].append(pos)
+    def merge(self, other: "InvertedIndex"):
+        """Об'єднання іншої частини індексу в поточний."""
+        for doc_id, length in other.doc_lengths.items():
+            self.doc_lengths[doc_id] = length
+            self.doc_paths[doc_id] = other.doc_paths[doc_id]
 
-            self.doc_metadata[doc_id] = DocMeta(
-                doc_id=doc_id,
-                filename=str(filepath),
-                length=doc_len
-            )
+        self.num_docs += other.num_docs
 
-            for term, tf in term_freqs.items():
-                if term not in raw_postings:
-                    raw_postings[term] = []
-                pos_tuple = tuple(term_positions[term]) if self.with_positions else None
-                raw_postings[term].append(Posting(doc_id=doc_id, tf=tf, positions=pos_tuple))
+        for term, postings in other.index.items():
+            self.index[term].extend(postings)
+            self.index[term].sort(key=lambda x: x[0])
 
-        self._postings = raw_postings
 
-@contextmanager
-def open_index(path: str):
-    index_obj = load_pickle(path)
-    try:
-        yield index_obj
-    finally:
-        pass
+def build_partial(args: Tuple[List[Path], int]) -> InvertedIndex:
+    """
+    Функція обробки шматка файлів.
+    Приймає (список_шляхів, start_doc_id).
+    """
+    paths, start_doc_id = args
+    partial_index = InvertedIndex()
 
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Build index with positions")
-    parser.add_argument("data_dir", help="Path to corpus")
-    parser.add_argument("--out", default="index.bin", help="Output file")
-    args = parser.parse_args()
+    for idx, path in enumerate(paths):
+        doc_id = start_doc_id + idx
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                text = f.read()
+            tokens = tokenize(text)
+            partial_index.add_document(doc_id, str(path), tokens)
+        except Exception:
+            continue
 
-    tracemalloc.start()
-    start_time = time.perf_counter()
+    return partial_index
 
-    idx = InvertedIndex(with_positions=True)
-    idx.build(args.data_dir)
-    save_pickle(idx, args.out)
 
-    elapsed = time.perf_counter() - start_time
-    _, peak_mem = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-
-    print(f"Індекс побудовано за {elapsed:.4f} сек | Пам'ять: {peak_mem / (1024 * 1024):.2f} МБ")
+def merge_indices(indices: List[InvertedIndex]) -> InvertedIndex:
+    """Послідовне об'єднання всіх часткових індексів."""
+    main_index = InvertedIndex()
+    for idx in indices:
+        main_index.merge(idx)
+    return main_index
