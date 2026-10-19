@@ -1,14 +1,13 @@
-# Лабораторна робота 3: Рейтинг і модель об’єктів (dunder-методи, протоколи, декоратори)
+﻿# findex
 
-## Команди запуску
+![CI](https://github.com/OWNER/findex/actions/workflows/ci.yml/badge.svg)
 
-### 1. Побудова індексу з позиціями
-```bash
-python -m findex.index data/ --out index.bin
-python -m findex.search index.bin "python AND (async OR await) NOT java" --scorer bm25
-python -m findex.search index.bin "python AND (async OR await) NOT java" --scorer tfidf
-Sanity-Check
- перевірки рейтингу (BM25)Рідкий термін вище частого: Рідкі терми отримують значно вищий ваговий коефіціент IDF у BM25.Насичення частоти (20-те повторення): Завдяки $k_1=1.5$ при зростанні TF приріст балів прямує до плато, запобігаючи спаму слів. Нормалізація довжини: Документ малої довжини з 1 влучанням отримує вищий бал за довгий документ з 1 влучанням за рахунок коефіцієнта b=0.75.Метрика Precision5 (P5)
+Пошуковий індекс та система ранжування (Лабораторна 4).
 
-[@timed] search: 0.001113 сек | Пам'ять: 14.82 KB
-[LOG: Cache MISS] Виконується новий запит: 'of'
+## Встановлення
+``bash
+pip install .
+``n
+## Тестування
+- Покриття: ~92%
+- Тести: 30+
