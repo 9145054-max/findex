@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Findex — Веб-пошук</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #333; }
+        h1 { color: #2b5797; display: flex; align-items: center; gap: 10px; }
+        .search-box { display: flex; gap: 10px; margin-bottom: 30px; }
+        input[type="text"] { flex: 1; padding: 12px; font-size: 16px; border: 2px solid #ccc; border-radius: 6px; }
+        button { padding: 12px 24px; font-size: 16px; background-color: #2b5797; color: white; border: none; border-radius: 6px; cursor: pointer; }
+        button:hover { background-color: #1e3c6e; }
+        .result-item { padding: 15px; border-bottom: 1px solid #eee; }
+        .result-title { font-size: 18px; color: #1a0dab; font-weight: bold; text-decoration: none; }
+        .result-score { font-size: 12px; color: #5f6368; margin-left: 10px; }
+        .badge { background: #e8f0fe; color: #1967d2; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Findex Search</h1>
+    <form class="search-box" action="/" method="get">
+        <input type="text" name="q" value="{{ query }}" placeholder="Введіть пошуковий запит..." required>
+        <button type="submit">Шукати</button>
+    </form>
+
+    {% if query %}
+        <h2>Результати для: <i>"{{ query }}"</i></h2>
+        {% if results %}
+            {% for item in results %}
+                <div class="result-item">
+                    <a class="result-title" href="/docs/{{ item.doc_id }}">{{ item.title }}</a>
+                    <span class="result-score badge">BM25: {{ item.score }}</span>
+                    <p>Сніпет тексту документа #{{ item.doc_id }} з підсвіткою запиту...</p>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p>Нічого не знайдено.</p>
+        {% endif %}
+    {% endif %}
+</body>
+</html>

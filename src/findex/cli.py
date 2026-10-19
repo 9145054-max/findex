@@ -6,8 +6,6 @@ from enum import Enum
 from typing import List
 import typer
 from rich.console import Console
-from rich.live import Live
-from rich.panel import Panel
 
 from findex.crawler import crawl
 from findex.index import InvertedIndex, build_partial, merge_indices
@@ -32,10 +30,9 @@ def crawl_cmd(
     """Асинхронний краулер сторінок з відображенням статистики в реальному часі."""
     start_time = time.time()
     fetched_count = 0
-    errors_count = 0
 
     async def run():
-        nonlocal fetched_count, errors_count
+        nonlocal fetched_count
         with open(out, "w", encoding="utf-8") as f:
             async for page in crawl(start_url, max_pages=max_pages, concurrency=concurrency):
                 f.write(json.dumps(page, ensure_ascii=False) + "\n")
@@ -45,7 +42,7 @@ def crawl_cmd(
     asyncio.run(run())
     
     elapsed = time.time() - start_time
-    typer.echo(f"Збірку завершено! Зібрано сторінок: {fetched_count} за {elapsed:.2f}s ({fetched_count/elapsed:.2f} pages/s)")
+    typer.echo(f"Збірку завершено! Зібрано сторінок: {fetched_count} за {elapsed:.2f}s ({fetched_count/max(elapsed, 0.001):.2f} pages/s)")
 
 
 @app.command()
@@ -93,6 +90,22 @@ def index(
     typer.echo(
         f"Успішно побудовано індекс для {final_index.num_docs} документів. Час merge: {t_merge:.4f}s"
     )
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="IP адреса для сервера"),
+    port: int = typer.Option(8000, "--port", "-p", help="Порт сервера"),
+    workers: int = typer.Option(1, "--workers", "-w", help="Кількість процесів uvicorn"),
+    index_path: Path = typer.Option(Path("index.bin"), "--index-path", help="Шлях до індексу"),
+):
+    """Запуск FastAPI сервісу через Uvicorn."""
+    import os
+    import uvicorn
+
+    os.environ["INDEX_PATH"] = str(index_path)
+    typer.echo(f"Запуск Findex Web API на http://{host}:{port} (workers={workers})...")
+    uvicorn.run("findex.web.app:app", host=host, port=port, workers=workers, reload=False)
 
 
 if __name__ == "__main__":
