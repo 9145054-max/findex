@@ -1,20 +1,51 @@
-import os
+import asyncio
+import json
 import time
-from enum import Enum
 from pathlib import Path
+from enum import Enum
 from typing import List
 import typer
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
 
+from findex.crawler import crawl
 from findex.index import InvertedIndex, build_partial, merge_indices
 
 app = typer.Typer(name="Findex", help="Findex: Пошуковий індекс та система ранжування")
+console = Console()
 
 
 class ExecutorType(str, Enum):
     serial = "serial"
     threads = "threads"
     processes = "processes"
+
+
+@app.command()
+def crawl_cmd(
+    start_url: str = typer.Argument(..., help="Початкова URL адреса"),
+    out: Path = typer.Option(Path("pages.jsonl"), help="Шлях для збереження JSONL"),
+    max_pages: int = typer.Option(200, "--max-pages", "-m", help="Максимальна кількість сторінок"),
+    concurrency: int = typer.Option(5, "--concurrency", "-c", help="Паралельність запитів")
+):
+    """Асинхронний краулер сторінок з відображенням статистики в реальному часі."""
+    start_time = time.time()
+    fetched_count = 0
+    errors_count = 0
+
+    async def run():
+        nonlocal fetched_count, errors_count
+        with open(out, "w", encoding="utf-8") as f:
+            async for page in crawl(start_url, max_pages=max_pages, concurrency=concurrency):
+                f.write(json.dumps(page, ensure_ascii=False) + "\n")
+                fetched_count += 1
+
+    typer.echo(f"Запуск краулера для {start_url} (max_pages={max_pages}, concurrency={concurrency})...")
+    asyncio.run(run())
+    
+    elapsed = time.time() - start_time
+    typer.echo(f"Збірку завершено! Зібрано сторінок: {fetched_count} за {elapsed:.2f}s ({fetched_count/elapsed:.2f} pages/s)")
 
 
 @app.command()
@@ -26,7 +57,7 @@ def index(
         ExecutorType.serial, "--executor", "-e", help="Тип виконавця (serial, threads, processes)"
     ),
 ):
-    """Findex index builder command."""
+    """Побудова індексу із підтримкою паралелізму."""
     all_files = sorted([p for p in data_dir.rglob("*") if p.is_file()])
     if not all_files:
         typer.echo("Файли не знайдені.")
@@ -47,9 +78,11 @@ def index(
         for task in tasks:
             partial_indices.append(build_partial(task))
     elif executor == ExecutorType.threads:
+        from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=workers) as pool:
             partial_indices = list(pool.map(build_partial, tasks))
     elif executor == ExecutorType.processes:
+        from concurrent.futures import ProcessPoolExecutor
         with ProcessPoolExecutor(max_workers=workers) as pool:
             partial_indices = list(pool.map(build_partial, tasks))
 
